@@ -1,1 +1,3 @@
 # echolocation_prototype
+
+このプロジェクトはプロジェクト・プロトタイプで作成するエコロケーションappです。
