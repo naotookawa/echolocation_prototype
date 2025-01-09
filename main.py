@@ -20,6 +20,7 @@ class AudioData(BaseModel):
     repeats: int # エコーの繰り返し回数
     left_delay: int 
     right_delay: int
+    position: float
 
 # リクエストの例
 # post http://localhost:8000/play
@@ -30,7 +31,8 @@ class AudioData(BaseModel):
 #     "delay_ms" : 20,
 #     "repeats" : 100,
 #     "left_delay" : 20,
-#     "right_delay" : 0
+#     "right_delay" : 0,
+#     "position" : 5
 # }
 
 app = FastAPI()
@@ -70,13 +72,47 @@ def apply_reverb(audio_data: AudioSegment, decay: float = 4, delay_ms: int = 50,
         output = audio_data  # オリジナル音声
         for i in tqdm(range(1, repeats + 1)):
             # エコーの生成: 遅延 + 減衰
-            echo = AudioSegment.silent(duration=delay_ms * i) + audio_data - (20 + i * decay)
+            echo = AudioSegment.silent(duration=delay_ms * i) + audio_data - (10 + i * decay)
             output = output.overlay(echo)
         print("リバーブ効果を適用しました。")
         return output
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"リバーブ効果の適用中にエラーが発生しました: {e}")
 
+# def apply_front_back_filter(audio_data: AudioSegment, position: int):
+#     """
+#     音源が前か後かに基づいてフィルタを適用。
+#     position: "front" or "back"
+#     """
+#     if position == 1:
+#         # 前の場合、高周波を少し強調
+#         filtered_audio = audio_data.low_pass_filter(12000)  # 12kHz以上を強調
+#     elif position == 0:
+#         # 後の場合、高周波を弱める
+#         filtered_audio = audio_data.low_pass_filter(3000)  # 3kHz以上を削減
+#     else:
+#         # その他の場合、何もしない
+#         filtered_audio = audio_data
+#     print("前後のフィルタを適用しました。")
+#     return filtered_audio
+
+def apply_front_back_filter(audio_data: AudioSegment, position: float):
+    """
+    音源の前後情報を基にフィルタを適用。
+    position: 0 (完全に後ろ) ～ 10 (完全に前)
+    """
+    if not (0 <= position <= 10):
+        raise ValueError("position must be between 0 and 10")
+
+    # positionに基づいてカットオフ周波数を計算
+    min_cutoff = 3000   # 完全に後ろの場合のカットオフ周波数 (3kHz)
+    max_cutoff = 12000  # 完全に前の場合のカットオフ周波数 (12kHz)
+    cutoff_freq = min_cutoff + (position / 10) * (max_cutoff - min_cutoff)
+
+    # フィルタを適用
+    filtered_audio = audio_data.low_pass_filter(cutoff_freq)
+    print(f"前後のフィルタを適用しました: position={position}, カットオフ周波数={cutoff_freq:.2f} Hz")
+    return filtered_audio
 
 @app.post("/play")
 async def play_audio(data: AudioData):
@@ -90,6 +126,7 @@ async def play_audio(data: AudioData):
     repeats = data.repeats
     left_delay = data.left_delay
     right_delay = data.right_delay
+    position = data.position
 
     try:
         # audio_data = AudioSegment.from_file(file.file, format=file.content_type)
@@ -114,13 +151,16 @@ async def play_audio(data: AudioData):
         # right_delay = 0
         # ITD（両耳間到達時間差）を加える
         stereo_with_itd = apply_itd(stereo_audio, left_delay, right_delay)
-        print("音声の再生を開始します。")
 
-        # 非同期的に音声を再生するためにスレッドを使用
+        # 音源が前か後ろかに基づいてフィルタを適用
+        # position = True  # True: 前, False: 後ろ
+        stereo_with_hrtf = apply_front_back_filter(stereo_with_itd, position)
+
+        print("音声の再生を開始します。")
         def play_in_thread(audio):
             play(audio)
 
-        threading.Thread(target=play_in_thread, args=(stereo_with_itd,)).start()
+        threading.Thread(target=play_in_thread, args=(stereo_with_hrtf,)).start()
 
         return {"message": "音声の再生を開始しました。"}
 
