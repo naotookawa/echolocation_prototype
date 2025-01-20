@@ -11,22 +11,15 @@ import asyncio
 import uvicorn
 from tqdm import tqdm
 from pydantic import BaseModel
-import interface
-
-class LocationData(BaseModel):
-    stage: int
-    x: float
-    z: float
-    direction: float
 
 class AudioData(BaseModel):
     left_vol: float  # 左チャンネルのボリューム（0.0 - 1.0 など）
     right_vol: float  # 右チャンネルのボリューム（0.0 - 1.0 など）
     decay: float  # 各エコーの減衰率（0 < decay < 1）
-    delay_ms: float # エコー間の遅延時間（ミリ秒）
+    delay_ms: int # エコー間の遅延時間（ミリ秒）
     repeats: int # エコーの繰り返し回数
-    left_delay: float 
-    right_delay: float
+    left_delay: int 
+    right_delay: int
     position: float
 
 # リクエストの例
@@ -60,25 +53,17 @@ app.add_middleware(
 def hello(request: Request):
     return {"message": "Hello World"}
 
+# ITD（両耳間到達時間差）を加える関数
 def apply_itd(audio_data: AudioSegment, left_delay_ms: int, right_delay_ms: int):
     left_channel, right_channel = audio_data.split_to_mono()
 
-    min_delay = min(left_delay_ms, right_delay_ms)
-    left_channel = AudioSegment.silent(duration=min_delay) + left_channel
-    right_channel = AudioSegment.silent(duration=min_delay) + right_channel
-    
-    # 追加の遅延を計算して適用
-    left_additional = left_delay_ms - min_delay
-    right_additional = right_delay_ms - min_delay
-    
-    if left_additional > 0:
-        left_channel = AudioSegment.silent(duration=left_additional) + left_channel
-    if right_additional > 0:
-        right_channel = AudioSegment.silent(duration=right_additional) + right_channel
-    max_length = max(len(left_channel), len(right_channel))
-    left_channel_with_delay = left_channel + AudioSegment.silent(duration=max_length - len(left_channel))
-    right_channel_with_delay = right_channel + AudioSegment.silent(duration=max_length - len(right_channel))
-    # print("ITDを適用しました。")
+    left_channel_with_delay = AudioSegment.silent(duration=left_delay_ms) + left_channel  # 左チャンネルに遅延
+    right_channel_with_delay = AudioSegment.silent(duration=right_delay_ms) + right_channel  # 右チャンネルに遅延
+
+    max_length = max(len(left_channel_with_delay), len(right_channel_with_delay))
+    left_channel_with_delay = left_channel_with_delay + AudioSegment.silent(duration=max_length - len(left_channel_with_delay))
+    right_channel_with_delay = right_channel_with_delay + AudioSegment.silent(duration=max_length - len(right_channel_with_delay))
+    print("ITDを適用しました。")
     return AudioSegment.from_mono_audiosegments(left_channel_with_delay, right_channel_with_delay)
 
 
@@ -89,7 +74,7 @@ def apply_reverb(audio_data: AudioSegment, decay: float = 4, delay_ms: int = 50,
             # エコーの生成: 遅延 + 減衰
             echo = AudioSegment.silent(duration=delay_ms * i) + audio_data - (10 + i * decay)
             output = output.overlay(echo)
-        # print("リバーブ効果を適用しました。")
+        print("リバーブ効果を適用しました。")
         return output
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"リバーブ効果の適用中にエラーが発生しました: {e}")
@@ -124,91 +109,65 @@ def apply_front_back_filter(audio_data: AudioSegment, position: float):
     max_cutoff = 12000  # 完全に前の場合のカットオフ周波数 (12kHz)
     # cutoff_freq = min_cutoff + (position / 10) * (max_cutoff - min_cutoff)
     cutoff_freq = (min_cutoff + max_cutoff) / 2 + (max_cutoff - min_cutoff) / 2 * position / 10
+
+    # フィルタを適用
     filtered_audio = audio_data.low_pass_filter(cutoff_freq)
-    # print(f"前後のフィルタを適用しました: position={position}, カットオフ周波数={cutoff_freq:.2f} Hz")
+    print(f"前後のフィルタを適用しました: position={position}, カットオフ周波数={cutoff_freq:.2f} Hz")
     return filtered_audio
 
 @app.post("/play")
-async def play_audio(data: LocationData):
+async def play_audio(data: AudioData):
+    start = time.time()
+    # if file.content_type != "audio/wav":
+    #     raise HTTPException(status_code=400, detail="WAV形式のファイルをアップロードしてください。")
+
+    left_vol = data.left_vol
+    right_vol = data.right_vol
+    decay = data.decay
+    delay_ms = data.delay_ms
+    repeats = data.repeats
+    left_delay = data.left_delay
+    right_delay = data.right_delay
+    position = data.position
+
     try:
-        audio_data: AudioData = interface.location_to_audiodata(data)
-        
-        audio = AudioSegment.from_file('shitauchi.wav', format="wav")
-        
-        if audio.channels != 1:
+        # audio_data = AudioSegment.from_file(file.file, format=file.content_type)
+        # audio_data = AudioSegment.from_file('test.wav', format="wav")
+        audio_data = AudioSegment.from_file('shitauchi.wav', format="wav")
+        if audio_data.channels != 1:
             raise HTTPException(status_code=400, detail="モノラルのmp3ファイルをアップロードしてください。")
         
-        def process_and_play(data: AudioData):
-            # 左右音量を調整してステレオ変換
-            stereo_audio = AudioSegment.from_mono_audiosegments(
-                audio.apply_gain(data.left_vol),
-                audio.apply_gain(data.right_vol)
-            )
-            # リバーブ効果の適用
-            stereo_audio = apply_reverb(stereo_audio, data.decay, data.delay_ms, data.repeats)
-            # ITD（両耳間到達時間差）を加える
-            stereo_with_itd = apply_itd(stereo_audio, data.left_delay, data.right_delay)
-            # 音源が前か後ろかに基づいてフィルタを適用
-            stereo_with_hrtf = apply_front_back_filter(stereo_with_itd, data.position)
-            print("音声の再生を開始します。")
-            play(stereo_with_hrtf)
+        # 左右音量を調整してステレオ変換
+        stereo_audio = AudioSegment.from_mono_audiosegments(
+            audio_data.apply_gain(left_vol),
+            audio_data.apply_gain(right_vol)
+        )
+        print("左右音量を調整しました。")
+
+        # リバーブ効果の適用（必要に応じて）
+        # if reverb:
+        #     stereo_audio = apply_reverb(stereo_audio)
+        stereo_audio = apply_reverb(stereo_audio, decay, delay_ms, repeats)
         
-        # 別スレッドで処理と再生を実行
-        threading.Thread(target=process_and_play, args=(audio_data,)).start()
-        
+        # left_delay =  40
+        # right_delay = 0
+        # ITD（両耳間到達時間差）を加える
+        stereo_with_itd = apply_itd(stereo_audio, left_delay, right_delay)
+
+        # 音源が前か後ろかに基づいてフィルタを適用
+        stereo_with_hrtf = apply_front_back_filter(stereo_with_itd, position)
+
+        print("音声の再生を開始します。")
+        def play_in_thread(audio):
+            play(audio)
+
+        print(f"処理時間: {time.time() - start:.2f}秒")
+        threading.Thread(target=play_in_thread, args=(stereo_with_hrtf,)).start()
+
         return {"message": "音声の再生を開始しました。"}
-        
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"エラーが発生しました: {str(e)}")
-
-# @app.post("/play/test")
-# async def play_audio(data: AudioData):
-#     left_vol = data.left_vol
-#     right_vol = data.right_vol
-#     decay = data.decay
-#     delay_ms = data.delay_ms
-#     repeats = data.repeats
-#     left_delay = data.left_delay
-#     right_delay = data.right_delay
-#     position = data.position
-
-#     try:
-#         # audio_data = AudioSegment.from_file(file.file, format=file.content_type)
-#         # audio_data = AudioSegment.from_file('test.wav', format="wav")
-#         audio_data = AudioSegment.from_file('shitauchi.wav', format="wav")
-#         if audio_data.channels != 1:
-#             raise HTTPException(status_code=400, detail="モノラルのmp3ファイルをアップロードしてください。")
-        
-#         # 左右音量を調整してステレオ変換
-#         stereo_audio = AudioSegment.from_mono_audiosegments(
-#             audio_data.apply_gain(left_vol),
-#             audio_data.apply_gain(right_vol)
-#         )
-#         print("左右音量を調整しました。")
-
-#         # リバーブ効果の適用（必要に応じて）
-#         # if reverb:
-#         #     stereo_audio = apply_reverb(stereo_audio)
-#         stereo_audio = apply_reverb(stereo_audio, decay, delay_ms, repeats)
-        
-#         # left_delay =  40
-#         # right_delay = 0
-#         # ITD（両耳間到達時間差）を加える
-#         stereo_with_itd = apply_itd(stereo_audio, left_delay, right_delay)
-
-#         # 音源が前か後ろかに基づいてフィルタを適用
-#         stereo_with_hrtf = apply_front_back_filter(stereo_with_itd, position)
-
-#         print("音声の再生を開始します。")
-#         def play_in_thread(audio):
-#             play(audio)
-
-#         threading.Thread(target=play_in_thread, args=(stereo_with_hrtf,)).start()
-
-#         return {"message": "音声の再生を開始しました。"}
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"エラーが発生しました: {e}")
+        raise HTTPException(status_code=500, detail=f"エラーが発生しました: {e}")
 
 
 
@@ -227,7 +186,8 @@ channels = 1
 def callback(indata, outdata, frames, time, status):
     if status:
         print(status)
-    print(indata)
+    print(type(indata))
+    print(indata.shape)
     outdata[:] = indata
 
 async def play_audio():
