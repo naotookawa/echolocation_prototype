@@ -31,28 +31,55 @@ for i in range(12, 21):
     stage1[13][i] = 1
 for i in range(16, 20):
     stage1[20][i] = 0
-print(stage1)
+# print(stage1)
 
-def find_wall_distances(x, z):
+
+stage2 = [
+    [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 1., 1., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 1., 1., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 1., 1., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 1., 1., 1., 1., 1., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 1., 1., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 1.],
+    [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0., 0., 0., 1.]
+]
+stage2 = np.array(stage2)
+
+
+def find_wall_distances(x, z, stage):
     # 前後左右に壁までの距離を初期化
-    front_wall = None
-    back_wall = None
-    left_wall = None
-    right_wall = None
+    front_wall = np.inf
+    back_wall = np.inf
+    left_wall = np.inf
+    right_wall = np.inf
     for i in range(z - 1, -1, -1):
-        if stage1[x, i] == 1:
+        if stage[x, i] == 1:
             left_wall = z - i
             break
     for i in range(z + 1, stage1.shape[1]):
-        if stage1[x, i] == 1:
+        if stage[x, i] == 1:
             right_wall = i - z
             break
     for i in range(x - 1, -1, -1):
-        if stage1[i, z] == 1:
+        if stage[i, z] == 1:
             front_wall = x - i
             break
     for i in range(x + 1, stage1.shape[0]):
-        if stage1[i, z] == 1:
+        if stage[i, z] == 1:
             back_wall = i - x
             break
     return front_wall, back_wall, left_wall, right_wall
@@ -76,9 +103,9 @@ def reflection(distance:int, direction:float) -> AudioData:
     return AudioData(
         left_vol = -cos * vol,
         right_vol = cos * vol,
-        decay = 0,
-        delay_ms = 0,
-        repeats = 0,
+        decay = 4,
+        delay_ms = distance * 8,
+        repeats = 10,
         left_delay = int(cos * 10) +  distance * 5,
         right_delay = distance * 5,
         # left_delay = cos * 10,
@@ -96,7 +123,7 @@ def location_to_audiodata(data: LocationData) -> AudioData:
 
     if data.stage == 1:
         # current_location = stage1[z_int][x_int]
-        front_wall, back_wall, left_wall, right_wall = find_wall_distances(z_int, x_int)
+        front_wall, back_wall, left_wall, right_wall = find_wall_distances(z_int, x_int, stage1)
         print("front_wall:", front_wall, "back_wall:", back_wall, "left_wall:", left_wall, "right_wall:", right_wall)
         audio_right = reflection(right_wall, direction)
         audio_front = reflection(left_wall, direction + 90)
@@ -111,4 +138,16 @@ def location_to_audiodata(data: LocationData) -> AudioData:
             audio = audio_front
         else:
             audio = audio_back
+    if data.stage == 2:
+        front_wall, back_wall, left_wall, right_wall = find_wall_distances(z_int, x_int, stage2)
+        print("front_wall:", front_wall, "back_wall:", back_wall, "left_wall:", left_wall, "right_wall:", right_wall)
+        close_wall = min(left_wall, right_wall, front_wall, back_wall)
+        if close_wall == left_wall:
+            audio = reflection(left_wall, direction + 180)
+        elif close_wall == right_wall:
+            audio = reflection(right_wall, direction)
+        elif close_wall == front_wall:
+            audio = reflection(left_wall, direction + 90)
+        else:
+            audio = reflection(back_wall, direction + 270)
     return audio
